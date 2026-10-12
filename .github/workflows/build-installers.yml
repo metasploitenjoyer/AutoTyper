@@ -1,0 +1,60 @@
+# Builds both installers in the cloud (handy if you don't own both a PC and a Mac).
+# Manual run: GitHub -> Actions -> "Build installers" -> Run workflow (artifacts to download).
+# Pushing a tag such as v1.0.0 also attaches the installers to a GitHub Release.
+# The installers are never committed to the repository.
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build installer
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File Files/installer/windows/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoTyper-Windows
+          path: |
+            AutoTyper-SetupWindows.exe
+            Files/build/AutoTyper-Portable.zip
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build app and dmg
+        run: bash Files/installer/macos/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoTyper-macOS
+          path: AutoTyper-macOS*.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" release-files/* --repo "${{ github.repository }}" --title "AutoTyper ${{ github.ref_name }}" --generate-notes
