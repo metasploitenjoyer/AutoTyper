@@ -52,10 +52,21 @@ if ((Test-Path "build\size-before.json") -and (Test-Path "build\size-after.json"
 
 if ($env:SKIP_SELFTEST -ne "1") {
     Step "Checking that the packaged app contains all its dependencies"
-    $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru
-    if ($p.ExitCode -ne 0) {
-        Get-Content (Join-Path $env:TEMP "AutoTyper-selftest.log") -ErrorAction SilentlyContinue
-        throw "Self-test of the packaged app failed (see log above). To check whether the size pruning is the cause, set AUTOTYPER_NO_PRUNE=1 and build again, then tell me what the log says."
+    $qtPrev = $env:QT_QPA_PLATFORM
+    $env:QT_QPA_PLATFORM = "offscreen"
+    try {
+        $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru
+        if ($p.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:TEMP "AutoTyper-selftest.log") -ErrorAction SilentlyContinue
+            throw "Self-test of the packaged app failed (see log above). To check whether the size pruning is the cause, set AUTOTYPER_NO_PRUNE=1 and build again, then tell me what the log says."
+        }
+    }
+    finally {
+        if ($null -eq $qtPrev) {
+            Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+        } else {
+            $env:QT_QPA_PLATFORM = $qtPrev
+        }
     }
     Write-Host "Self-test passed" -ForegroundColor Green
 }
