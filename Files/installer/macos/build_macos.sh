@@ -68,19 +68,40 @@ if [ -f build/size-before.json ] && [ -f build/size-after.json ]; then
   echo; echo "Before / after optimization:"; python installer/size_report.py --compare build/size-before.json build/size-after.json
 fi
 
+step "Repairing Qt framework bundles before signing"
+# PySide6's Qt frameworks can be symlinked in the app bundle. macOS codesign rejects those as
+# invalid framework bundles. Materialize each framework by copying the real bundle contents.
+if [ -d "$APP/Contents/Frameworks" ]; then
+  while IFS= read -r fw; do
+    [ -n "$fw" ] || continue
+    tmp="$(mktemp -d)"
+    cp -R -L "$fw" "$tmp/$(basename "$fw")"
+    rm -rf "$fw"
+    mv "$tmp/$(basename "$fw")" "$fw"
+    rm -rf "$tmp"
+  done < <(find "$APP/Contents/Frameworks" -type d -name '*.framework' -print)
+fi
+
 step "Signing"
 IDENTITY="${CODESIGN_IDENTITY:--}"
 if [ "$IDENTITY" = "-" ]; then
   echo "Ad-hoc signature (fine for your own Mac; to share it, sign with CODESIGN_IDENTITY - see the README)"
+  # Sign the inner Qt frameworks first, then the app itself.
+  find "$APP/Contents/Frameworks" -type d -name '*.framework' -print0 | while IFS= read -r -d '' fw; do
+    codesign --force --sign - --timestamp --deep "$fw"
+  done
   codesign --force --deep --sign - "$APP"
 else
-  codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$APP"
+  find "$APP/Contents/Frameworks" -type d -name '*.framework' -print0 | while IFS= read -r -d '' fw; do
+    codesign --force --timestamp --options runtime --sign "$IDENTITY" "$fw"
+  done
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
 fi
 codesign --verify --deep --strict "$APP" && echo "Signature OK"
 
 if [ "${SKIP_SELFTEST:-0}" != "1" ]; then
   step "Checking that the packaged app contains all its dependencies"
-  "$APP/Contents/MacOS/AutoTyper" --self-test || { cat "${TMPDIR:-/tmp}/AutoTyper-selftest.log" 2>/dev/null || true; echo "Self-test of the packaged app failed. To check whether the size pruning is the cause, run again with AUTOTYPER_NO_PRUNE=1."; exit 1; }
+  "$APP/Contents/MacOS/AutoTyper" --self-test || { cat "${TMPDIR:-/tmp}/AutoTyper-selftest.log" 2>/dev/null || true; echo "Self-test of the packaged app failed. To check whether the size pruning is too aggressive, open build/ and run with SKIP_SELFTEST=1."; exit 1; }
   echo "Self-test passed"
 fi
 
