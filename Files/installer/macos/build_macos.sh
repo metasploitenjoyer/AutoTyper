@@ -69,8 +69,9 @@ if [ -f build/size-before.json ] && [ -f build/size-after.json ]; then
 fi
 
 step "Repairing Qt framework bundles before signing"
-# PySide6's Qt frameworks can be symlinked in the app bundle. macOS codesign rejects those as
-# invalid framework bundles. Materialize each framework by copying the real bundle contents.
+# PySide6's Qt frameworks can be symlinked or otherwise include symlinked internals. macOS codesign
+# rejects these as invalid framework bundles. Materialize each framework by copying the real bundle
+# contents, which turns the symlinks into a real on-disk bundle that codesign accepts.
 if [ -d "$APP/Contents/Frameworks" ]; then
   while IFS= read -r fw; do
     [ -n "$fw" ] || continue
@@ -79,7 +80,7 @@ if [ -d "$APP/Contents/Frameworks" ]; then
     rm -rf "$fw"
     mv "$tmp/$(basename "$fw")" "$fw"
     rm -rf "$tmp"
-  done < <(find "$APP/Contents/Frameworks" -type d -name '*.framework' -print)
+  done < <(find "$APP/Contents/Frameworks" \( -type d -o -type l \) -name '*.framework' -print)
 fi
 
 step "Signing"
@@ -101,7 +102,7 @@ codesign --verify --deep --strict "$APP" && echo "Signature OK"
 
 if [ "${SKIP_SELFTEST:-0}" != "1" ]; then
   step "Checking that the packaged app contains all its dependencies"
-  "$APP/Contents/MacOS/AutoTyper" --self-test || { cat "${TMPDIR:-/tmp}/AutoTyper-selftest.log" 2>/dev/null || true; echo "Self-test of the packaged app failed. To check whether the size pruning is too aggressive, open build/ and run with SKIP_SELFTEST=1."; exit 1; }
+  "$APP/Contents/MacOS/AutoTyper" --self-test || { cat "${TMPDIR:-/tmp}/AutoTyper-selftest.log" 2>/dev/null || true; echo "Self-test of the packaged app failed. To check whether the size pruning removed something important, inspect the log file from the failed run or rerun with SKIP_SELFTEST=1 to bypass this check."; exit 1; }
   echo "Self-test passed"
 fi
 
