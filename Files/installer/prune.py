@@ -15,7 +15,9 @@ KEEP_QT_MODULES = {"core", "gui", "widgets", "svg"}
 KEEP_PLUGIN_DIRS = {"platforms", "styles"}
 DROP_FILENAMES = {"opengl32sw.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll"}
 DROP_SUFFIXES = (".qm", ".pyi", ".qmltypes", ".qmlc")
-DROP_QT_DIRS = ("translations", "qml", "metatypes", "resources", "lupdate")
+# NOTE: never drop folders called "resources": every macOS .framework keeps its Info.plist in Resources/,
+# and a framework without it is rejected by codesign ("bundle format unrecognized").
+DROP_QT_DIRS = ("translations", "qml", "metatypes", "lupdate")
 
 # Standard-library and tool modules AutoTyper never imports
 EXCLUDE_MODULES = [
@@ -59,7 +61,8 @@ def keep_entry(name):
     if base in DROP_FILENAMES or p.endswith(DROP_SUFFIXES):
         return False
     qt_path = "/qt" in p or "pyside6" in p
-    if qt_path and any(f"/{d}/" in p for d in DROP_QT_DIRS):
+    in_framework = ".framework/" in p            # macOS frameworks are only kept or dropped as a whole
+    if qt_path and not in_framework and any(f"/{d}/" in p for d in DROP_QT_DIRS):
         return False
     if "/plugins/" in p:                                   # Qt plugins: only the platform + styles
         sub = p.split("/plugins/", 1)[1].split("/", 1)[0]
